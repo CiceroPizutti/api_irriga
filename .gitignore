@@ -1,0 +1,13 @@
+# Arquivos de ambiente
+.env
+
+# Ambientes virtuais do Python
+.venv/
+
+# Cache e arquivos compilados do Python
+__pycache__/
+*.pyc
+
+# Arquivos de teste específicos
+test_mongo.py
+

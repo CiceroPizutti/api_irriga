@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Umidade do Solo</title>
+    <!-- Tailwind CSS para Estilo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Define a fonte Inter (padrão Google) e garante cores de fundo agradáveis */
+        body { font-family: 'Inter', sans-serif; background-color: #f7f7f9; }
+        /* Garante que o canvas seja responsivo */
+        #chartContainer { max-width: 100%; height: 400px; }
+    </style>
+    <!-- Chart.js para Plotagem de Gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto bg-white shadow-xl rounded-xl p-6 md:p-8">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
+            Monitor de Umidade (ESP32)
+        </h1>
+
+        <!-- Painel de Métricas -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div id="statusCard" class="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4 shadow-sm">
+                <p class="text-sm font-medium text-gray-500">Status da Conexão</p>
+                <p class="text-lg font-semibold text-blue-700">Aguardando...</p>
+            </div>
+            <div class="bg-green-50 border-l-4 border-green-500 rounded-lg p-4 shadow-sm">
+                <p class="text-sm font-medium text-gray-500">Média (Últimas 24h)</p>
+                <p id="mediaDisplay" class="text-lg font-semibold text-green-700">--</p>
+            </div>
+            <div class="bg-purple-50 border-l-4 border-purple-500 rounded-lg p-4 shadow-sm">
+                <p class="text-sm font-medium text-gray-500">Total de Amostras</p>
+                <p id="amostrasDisplay" class="text-lg font-semibold text-purple-700">--</p>
+            </div>
+        </div>
+
+        <!-- Área do Gráfico -->
+        <div class="mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Histórico de Umidade (%)</h2>
+            <div id="chartContainer">
+                <canvas id="umidadeChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- Controles -->
+        <div class="flex flex-col sm:flex-row gap-4 items-center justify-between pt-4 border-t">
+            <div class="flex items-center space-x-2">
+                <label for="horas" class="text-gray-600">Visualizar:</label>
+                <select id="horas" class="p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                    <option value="4">Últimas 4 Horas</option>
+                    <option value="8">Últimas 8 Horas</option>
+                    <option value="24" selected>Últimas 24 Horas</option>
+                    <option value="72">Últimas 72 Horas</option>
+                </select>
+            </div>
+            <button id="refreshButton" class="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg shadow-md hover:bg-blue-700 transition duration-150">
+                Atualizar Dados
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // !! SUBSTITUA ESTA URL PELO SEU ENDEREÇO LOCAL DO FASTAPI (EX: http://192.168.0.101:8000)
+        const FASTAPI_BASE_URL = "http://192.168.0.103:8000"; 
+        
+        let umidadeChart;
+        const statusCard = document.getElementById('statusCard');
+        const mediaDisplay = document.getElementById('mediaDisplay');
+        const amostrasDisplay = document.getElementById('amostrasDisplay');
+        const horasSelect = document.getElementById('horas');
+        const refreshButton = document.getElementById('refreshButton');
+
+        // Função principal para buscar e plotar os dados
+        async function fetchAndPlotData() {
+            const horas = horasSelect.value;
+            const apiUrl = `${FASTAPI_BASE_URL}/historico/grafico?horas=${horas}`;
+            
+            // 1. Mostrar estado de carregamento
+            statusCard.innerHTML = `<p class="text-sm font-medium text-gray-500">Status da Conexão</p><p class="text-lg font-semibold text-yellow-600">Carregando...</p>`;
+            refreshButton.disabled = true;
+
+            try {
+                // 2. Fazer a requisição ao FastAPI
+                const response = await fetch(apiUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP Erro: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // 3. Atualizar métricas (Média e Amostras)
+                mediaDisplay.textContent = data.amostras > 0 ? `${data.media_ultima_hora}%` : '--';
+                amostrasDisplay.textContent = data.amostras;
+                
+                // 4. Formatar os dados para o Chart.js
+                // Usamos as datas (timestamps) como labels e as umidades como dataset
+                const labels = data.timestamps.map(ts => {
+                    // Formata o timestamp para algo mais legível
+                    const date = new Date(ts);
+                    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                });
+
+                // 5. Destruir o gráfico antigo se existir e criar o novo
+                if (umidadeChart) {
+                    umidadeChart.destroy();
+                }
+
+                const ctx = document.getElementById('umidadeChart').getContext('2d');
+                umidadeChart = new Chart(ctx, {
+                    type: 'line', // Tipo de gráfico: Linha
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Umidade do Solo (%)',
+                            data: data.umidades,
+                            borderColor: '#3b82f6', // Cor da linha azul
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)', // Sombra abaixo da linha
+                            borderWidth: 2,
+                            tension: 0.4, // Suaviza a linha
+                            pointRadius: 0 // Remove os pontos
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false, // Permite definir o tamanho no CSS
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: {
+                                    display: true,
+                                    text: 'Umidade (%)'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Hora Local'
+                                },
+                                // Oculta a maioria das labels para evitar sobreposição em muitos pontos
+                                ticks: {
+                                    maxTicksLimit: 12 
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false }, // Oculta a legenda
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) { label += ': '; }
+                                        if (context.parsed.y !== null) {
+                                            label += `${context.parsed.y}%`;
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                // 6. Atualizar status de sucesso
+                statusCard.innerHTML = `<p class="text-sm font-medium text-gray-500">Status da Conexão</p><p class="text-lg font-semibold text-green-700">Sucesso. Atualizado em ${new Date().toLocaleTimeString('pt-BR')}</p>`;
+
+
+            } catch (error) {
+                // 7. Lidar com erros de conexão
+                console.error("Erro ao buscar dados do FastAPI:", error);
+                statusCard.innerHTML = `<p class="text-sm font-medium text-gray-500">Status da Conexão</p><p class="text-lg font-semibold text-red-700">ERRO! Verifique o FastAPI (${FASTAPI_BASE_URL})</p>`;
+            } finally {
+                refreshButton.disabled = false;
+            }
+        }
+
+        // Event Listeners
+        window.onload = function() {
+            // Inicializa o gráfico na carga da página
+            fetchAndPlotData();
+        };
+
+        // Adiciona evento ao botão e ao seletor de horas
+        refreshButton.addEventListener('click', fetchAndPlotData);
+        horasSelect.addEventListener('change', fetchAndPlotData);
+        
+    </script>
+
+</body>
+</html>
